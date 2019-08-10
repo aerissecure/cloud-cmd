@@ -1,6 +1,24 @@
 # Fork
 
-Forked from tomsteele/cloud-proxy and repurposed to support scanning only, and maybe eventuall additional commands.
+Forked from `tomsteele/cloud-proxy` and repurposed to support scanning only, and maybe eventuall additional commands.
+
+./cloud-cmd -p 1,2,3,4-200,500 -nmap
+
+```shell
+nmap -oX ex.tcp.1.datascan-01 nmap -v4 -Pn -n -sS --max-rtt-timeout 120ms --min-rtt-timeout 50ms --initial-rtt-timeout 120ms --max-retries 1 --max-rate 10 --min-hostgroup 4096
+
+m := map[string]interface{}{"name": "John", "age": 47}
+t := template.Must(template.New("").Parse("Hi {{.name}}. Your age is {{.age}}\n"))
+t.Execute(os.Stdout, m)
+```
+
+the basic idea is that for nmap, you pass in a port list. the list will be devided up into a number of equal chuncks that matches the number of launched droplets. You also pass in a templated nmap command. The templated nmap command as one variable for the split ports `{{.ports}}`, one variable for the instance index `{{.index}}` (which will be a zero padded number with the padding matching the number of launched hosts (0 for 1-9, 1 for 10-99, 2 for 100-999, etc.)). We should probably also make available `{{.ip}}` for the public ip address of the droplet and `{{.hostname}}` (or dropletname) for the name of the droplet
+
+The nmap command will run and stdout will be streamed into output files matching the index. This would mean  you're meant to run nmap with `-oX -`. Though we could create an output file and download that at the end, or stream that file back as its written. I think we start with -oX first.
+
+We should support some watch command, but for now it may be easiest to just print out the makings of a watch command to be filled in by the caller.
+
+Just need to figure out what I want to actuall print to the screen now.
 
 # cloud-proxy
 cloud-proxy creates multiple DO droplets and then starts local socks proxies using SSH. After exiting, the droplets are deleted.

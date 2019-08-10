@@ -2,8 +2,16 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"context"
 	"fmt"
+	"log"
+	"os"
 	"os/exec"
+	"strings"
+	"text/template"
+
+	"golang.org/x/crypto/ssh"
 
 	"github.com/digitalocean/godo"
 )
@@ -11,12 +19,29 @@ import (
 // Machine is just a wrapper around a created droplet.
 type Machine struct {
 	ID        int
+	Index     int // Index (starting with 1) for the order droplet was created
 	Name      string
 	IPv4      string
 	SSHActive bool
 	Stderr    *bufio.Reader
 	Listener  string
 	CMD       *exec.Cmd
+
+	SSHConfig *ssh.ClientConfig
+	SSHClient *ssh.Client
+	Template  string
+	Ports     string
+}
+
+// Println uses fmt.Println to log to the console, formatted for this machine.
+func (m *Machine) Println(a ...interface{}) {
+	a = append([]interface{}{fmt.Sprintf("%s (%d):", m.Name, m.Index)}, a...)
+	log.Println(a...)
+}
+
+// Printf uses fmt.Printf to log to the console, formatted for this machine.
+func (m *Machine) Printf(format string, a ...interface{}) {
+	log.Printf(fmt.Sprintf("%s (%d): %s", m.Name, m.Index, format), a...)
 }
 
 // IsReady ensures that the machine has an IP address.
@@ -26,7 +51,7 @@ func (m *Machine) IsReady() bool {
 
 // GetIPs populates the IPv4 address of the machine.
 func (m *Machine) GetIPs(client *godo.Client) error {
-	droplet, _, err := client.Droplets.Get(m.ID)
+	droplet, _, err := client.Droplets.Get(context.Background(), m.ID)
 	if err != nil {
 		return err
 	}
@@ -35,6 +60,93 @@ func (m *Machine) GetIPs(client *godo.Client) error {
 		return err
 	}
 	return nil
+}
+
+func (m *Machine) InstallPackages(packages []string) error {
+	session, err := m.SSHClient.NewSession()
+	if err != nil {
+		return fmt.Errorf("error creating ssh session: %v", err)
+	}
+	out, err := session.CombinedOutput("apt-get update")
+	if err != nil {
+		return fmt.Errorf("error running apt-get update command: %v", err)
+	}
+	_ = out
+	// if session.CombinedOutput err == nil, command returned with zero exit status
+	// we only really need out in verbose mode or on error
+	// m.Println(string(out))
+	session.Close()
+
+	session, err = m.SSHClient.NewSession()
+	if err != nil {
+		return fmt.Errorf("error creating ssh session: %v", err)
+	}
+	out, err = session.CombinedOutput("apt-get install -y " + strings.Join(packages, " "))
+	if err != nil {
+		return fmt.Errorf("error running apt-get install command: %v", err)
+	}
+	_ = out
+	// if session.CombinedOutput err == nil, command returned with zero exit status
+	// we only really need out in verbose mode or on error
+	// m.Println(string(out))
+	session.Close()
+
+	return nil
+}
+
+// RunCommand runs the templated command on the remote host. This should
+// be launched in a go routine using a waitgroup.
+func (m *Machine) RunCommand(filename string) error {
+	output, err := os.Create(filename)
+	if err != nil {
+		return fmt.Errorf("error creating file for stdout: %v", err)
+	}
+	session, err := m.SSHClient.NewSession()
+	if err != nil {
+		return fmt.Errorf("error creating ssh session: %v", err)
+	}
+	session.Stdout = output
+	// hook up a stderr pipe to use the machine's println to record the status. i think launching this
+	// in a goroutine and then terminating the goroutine on eof would be good enough.
+
+	stderr, err := session.StderrPipe()
+	if err != nil {
+		return err
+	}
+	m.Stderr = bufio.NewReader(stderr)
+
+	cmd, err := m.Command()
+	if err != nil {
+		return fmt.Errorf("error creating templated command: %v", err)
+	}
+
+	if err = session.Start(cmd); err != nil {
+		return fmt.Errorf("error running command: %v", err)
+	}
+
+	go m.PrintStdError()
+
+	return session.Wait()
+}
+
+// Command generates the command to be run on the remote hosting using the defined Template.
+func (m *Machine) Command() (string, error) {
+	vars := map[string]interface{}{
+		"ports": m.Ports,
+		"index": m.Index,
+		"ip":    m.IPv4,
+		"name":  m.Name,
+	}
+	var cmd bytes.Buffer
+	t, err := template.New("").Parse(m.Template)
+	if err != nil {
+		return "", fmt.Errorf("error parsing template: %v", err)
+	}
+	err = t.Execute(&cmd, vars)
+	if err != nil {
+		return "", fmt.Errorf("error executing template: %v", err)
+	}
+	return cmd.String(), nil
 }
 
 // StartSSHProxy starts a socks proxy on 127.0.0.1 or the desired port.
@@ -55,7 +167,7 @@ func (m *Machine) StartSSHProxy(port, sshKeyLocation string) error {
 
 // Destroy deletes the droplet.
 func (m *Machine) Destroy(client *godo.Client) error {
-	_, err := client.Droplets.Delete(m.ID)
+	_, err := client.Droplets.Delete(context.Background(), m.ID)
 	return err
 }
 
@@ -84,7 +196,6 @@ func (m *Machine) PrintStdError() {
 			fmt.Println(str)
 		}
 	}
-
 }
 
 func printProxyChains(machines []Machine) {

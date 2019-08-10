@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/digitalocean/godo"
@@ -9,7 +10,7 @@ import (
 
 func doRegions(client *godo.Client) ([]string, error) {
 	slugs := []string{}
-	regions, _, err := client.Regions.List(&godo.ListOptions{})
+	regions, _, err := client.Regions.List(context.Background(), &godo.ListOptions{})
 	if err != nil {
 		return slugs, err
 	}
@@ -32,7 +33,8 @@ func newDropLetMultiCreateRequest(prefix, region, keyID string, count int) *godo
 		Region: region,
 		Size:   "512mb",
 		Image: godo.DropletCreateImage{
-			Slug: "ubuntu-14-04-x64",
+			// Slug: "ubuntu-14-04-x64",
+			Slug: "debian-10-x64",
 		},
 		SSHKeys: []godo.DropletCreateSSHKey{
 			godo.DropletCreateSSHKey{
