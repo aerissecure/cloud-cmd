@@ -1,109 +1,50 @@
-# Fork
+# cloud-cmd
 
-Forked from `tomsteele/cloud-proxy` and repurposed to support scanning only, and maybe eventuall additional commands.
+cloud-cmd was forked from the wonderful `tomsteele/cloud-proxy` project. Where the goal of cloud-proxy was to provide multiple cloud instances for SOCKS proxies, the cloud-cmd provides a convenient way to divide commands among multiple cloud instances.
 
-./cloud-cmd -p 1,2,3,4-200,500 -nmap
+The primary use case, at least currently, is to split an Nmap scan across multiple cloud instances. During penetration testing engagements we sometimes encounter targets that blacklist you or otherwise change their bahaviour when they detect they are being port scanned (such as show all ports as open...I'm looking at you SonicWall).
+
+This is accomplished with a few bits of functionality, some of which the user has control over, and others which rely on hardcoded functionality. For instance, the command that gets passed to each cloud instance is configurable by the caller using Go `text/template` syntax passed to the `-cmd` flag. But one of the variables availble to the template relies on hard-coded functionality in cloud-cmd--the `-ports` flag. This flag takes a valid nmap port list (e.g. the top 5 TCP ports `21-23,80,443`) but breaks the list into equal size chunks anded passes them into the command template for each cloud instance as the `{{.ports}}` variable.
+
+There are 4 built-in variables that are passed to the command template so far: `{{.ports}}`, `{{.index}}`, `{{.ip}}`, and `{{.name}}`. Any shell command that can be successfully divided accross all cloud instances using these variables is fair game. Commands requiring additional splitting/dividing functionality (similar to the `-ports` flag and template variable) would need to have them added to cloud-cmd. As an example, if instead of dividing the ports accross the cloud instances for the same set of scan targets you wanted to scall the same ports but divide up the targets, we'd need to add a new flag and functionality for dividing something like a comma-separate list into different chunks.
+
+# Usage
+
+In order to deploy instances, you must provide your Digital Ocean API key either either with the flag `-token`, or with the environment variable `DOTOKEN`.
+
+In order to launch the instances and connect to them, you must provide the path to an SSH private key who's public key and signature are already configured in your Digital Ocean account using the `key-location`. It is OK if the private key is encrypted, you will be prompted for the password before the tool proceeds.
+
+Provide the number of cloud instances you want to launch with the `-count` flag.
+
+Provide the command you want to run with the `-cmd` flag. The command uses Go `text/template` syntax and has the following variables avilable to it:
+
+- `{{.index}}`: the number/index marking the order that instances was launched, starting at 1.
+- `{{.ip}}`: The public IPv4 address of the cloud instance.
+- `{{.name}}`: The name assigned to the instance by Digital Ocean, which also happens to be the configured hostname.
+- `{{.ports}}`: One slice of total ports specified with the `-ports` flag.
+
+
+If successfull completion of the command requires some packages be installed first, pass a comma-separated list of packages to the `-pkg` flag.
+
+While the command is running on the cloud instances, stderr for the SSH session will be printed as log lines in the output from cloud-cmd. Stdout for the SSH session will be redirected into files output into the current directory, one for each instance, called `out-{{.index}}.xml`. Note that the file extension can be changed with the `-ext` flag.
+
+# Example
+
+[![asciicast](https://asciinema.org/a/RYLcBjGhfHg4ffrKiCck2e3ZK.svg)](https://asciinema.org/a/RYLcBjGhfHg4ffrKiCck2e3ZK)
 
 ```shell
-nmap -oX ex.tcp.1.datascan-01 nmap -v4 -Pn -n -sS --max-rtt-timeout 120ms --min-rtt-timeout 50ms --initial-rtt-timeout 120ms --max-retries 1 --max-rate 10 --min-hostgroup 4096
-
-m := map[string]interface{}{"name": "John", "age": 47}
-t := template.Must(template.New("").Parse("Hi {{.name}}. Your age is {{.age}}\n"))
-t.Execute(os.Stdout, m)
+./cloud-cmd -key-location ~/.ssh/keys.d/id_rsa.admin -name clientName -count 50 -cmd "nmap -v4 -oX - -Pn -n --max-rate 10 -p {{.ports}} -sS aerissecure.com" -ports 1-65535 -force
 ```
 
-the basic idea is that for nmap, you pass in a port list. the list will be devided up into a number of equal chuncks that matches the number of launched droplets. You also pass in a templated nmap command. The templated nmap command as one variable for the split ports `{{.ports}}`, one variable for the instance index `{{.index}}` (which will be a zero padded number with the padding matching the number of launched hosts (0 for 1-9, 1 for 10-99, 2 for 100-999, etc.)). We should probably also make available `{{.ip}}` for the public ip address of the droplet and `{{.hostname}}` (or dropletname) for the name of the droplet
+In the example above we have the solution to the problem that motivated the creation of cloud-cmd. We are limiting the rate of our nmap scan using `--max-rate 10` which is incredibly slow. It would take around 3 hours to complete a scan of all ports on a single host with a rate that low if we were scanning from a single system. We've specified a port list with `-ports` that will split those ports accross each cloud instance. Note that the actual command to be run will be printed to the shell before running on each cloud instance.
 
-The nmap command will run and stdout will be streamed into output files matching the index. This would mean  you're meant to run nmap with `-oX -`. Though we could create an output file and download that at the end, or stream that file back as its written. I think we start with -oX first.
+Also note that we are using `-oX -` in the command to output the scan results in xml format to stdout where they will be captured by cloud-cmd and redirected to the output file for that cloud instance.
 
-We should support some watch command, but for now it may be easiest to just print out the makings of a watch command to be filled in by the caller.
-
-Just need to figure out what I want to actuall print to the screen now.
-
-# cloud-proxy
-cloud-proxy creates multiple DO droplets and then starts local socks proxies using SSH. After exiting, the droplets are deleted.
-
-### Warning
-This tool will deploy as many droplets as you desire, and will make a best effort to delete them after use. However, you are ultimately going to pay the bill for these droplets, and it is up to you, and you alone to ensure they actually get deleted.
 
 ### Install
-Download a compiled release [here](https://github.com/tomsteele/cloud-proxy/releases/latest). You can now execute without any dependencies. Currently the only supported and tested OS is Linux:
-```
-$ ./cloud-proxy
-```
-### Usage
-```
-Usage of ./cloud-proxy:
-  -count int
-        Amount of droplets to deploy (default 5)
-  -force
-        Bypass built-in protections that prevent you from deploying more than 50 droplets
-  -key string
-        SSH key fingerprint
-  -key-location string
-        SSH key location (default "~/.ssh/id_rsa")
-  -name string
-        Droplet name prefix (default "cloud-proxy")
-  -regions string
-        Comma separated list of regions to deploy droplets to, defaults to all. (default "*")
-  -start-tcp int
-        TCP port to start first proxy on and increment from (default 55555)
-  -token string
-        DO API key
-  -v    Print version and exit
-```
 
-### Getting Started
-To use cloud-proxy you will need to have a DO API token, you can get one [here](https://cloud.digitalocean.com/settings/api/tokens). Next, ensure you have an SSH key saved on DO. This is the key that SSH will authentication with. The DO API and cloud-proxy require you to provide the fingerprint of the key you would like to use. You can obtain the fingerprint using `ssh-keygen`:
-```
-$ ssh-keygen -lf ~/.ssh/id_rsa.pub
-```
+Install using `go get`:
 
-If your key requires a passphrase, you will need to use ssh-agent:
+```shell
+go install github.com/aerissecure/cloud-cmd
 ```
-$ eval `ssh-agent -s`
-$ ssh-add ~/.ssh/id_rsa
-```
-
-Now you may create some proxies:
-```
-$ cloud-proxy -count 2 -token <api-token> -key <fingerprint>
-```
-
-When you are finished using your proxies, use CTRL-C to interrupt the program, cloud-proxy will catch the interrupt and delete the droplets.
-
-cloud-proxy will output a proxy list for proxychains and [socksd](https://github.com/eahydra/socks/tree/master/cmd/socksd). proxychains can be configured to iterate over a random proxy for each connection by uncommenting `random_chain`, you should also comment out `string-chain`, which is the default. You will also need to uncomment `chain_len` and set it to `1`.
-
-socksd can be helpful for programs that can accept a socks proxy, but may not work nicely with proxychains. socksd will listen as a socks proxy, and can be configured to use a set of upstream proxies, which it will iterate through in a round-robin manner. Follow the instructions in the README linked above, as it is self explanitory.
-
-### Example Output
-```
-$ ./cloud-proxy -token <my_token> -key <my_fingerprint>
-==> Info: Droplets deployed. Waiting 100 seconds...
-==> Info: SSH proxy started on port 55555 on droplet name: cloud-proxy-1 IP: <IP>
-==> Info: SSH proxy started on port 55556 on droplet name: cloud-proxy-2 IP: <IP>
-==> Info: SSH proxy started on port 55557 on droplet name: cloud-proxy-3 IP: <IP>
-==> Info: SSH proxy started on port 55558 on droplet name: cloud-proxy-4 IP: <IP>
-==> Info: SSH proxy started on port 55559 on droplet name: cloud-proxy-5 IP: <IP>
-==> Info: proxychains config
-socks5 127.0.0.1 55555
-socks5 127.0.0.1 55556
-socks5 127.0.0.1 55557
-socks5 127.0.0.1 55558
-socks5 127.0.0.1 55559
-==> Info: socksd config
-"upstreams": [
-{"type": "socks5", "address": "127.0.0.1:55555"},
-{"type": "socks5", "address": "127.0.0.1:55556"},
-{"type": "socks5", "address": "127.0.0.1:55557"},
-{"type": "socks5", "address": "127.0.0.1:55558"},
-{"type": "socks5", "address": "127.0.0.1:55559"}
-]
-==> Info: Please CTRL-C to destroy droplets
-^C==> Info: Deleted droplet name: cloud-proxy-1
-==> Info: Deleted droplet name: cloud-proxy-2
-==> Info: Deleted droplet name: cloud-proxy-3
-==> Info: Deleted droplet name: cloud-proxy-4
-==> Info: Deleted droplet name: cloud-proxy-5
-```
-
