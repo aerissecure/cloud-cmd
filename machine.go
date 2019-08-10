@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -114,6 +115,7 @@ func (m *Machine) RunCommand(filename string) error {
 		return err
 	}
 	m.Stderr = bufio.NewReader(stderr)
+	go m.PrintStdError()
 
 	cmd, err := m.Command()
 	if err != nil {
@@ -123,8 +125,6 @@ func (m *Machine) RunCommand(filename string) error {
 	if err = session.Start(cmd); err != nil {
 		return fmt.Errorf("error running command: %v", err)
 	}
-
-	go m.PrintStdError()
 
 	return session.Wait()
 }
@@ -189,11 +189,15 @@ func dropletsToMachines(droplets []godo.Droplet) []Machine {
 
 // PrintStdError reads from stderr from ssh and prints it to stdout.
 func (m *Machine) PrintStdError() {
+	// str, err := m.Stderr.ReadString('\n')
+	// fmt.Printf("READ STRING: %q, err: %v\n", str, err)
 	for {
 		str, err := m.Stderr.ReadString('\n')
-		if err != nil && str != "" {
-			fmt.Printf("From %s SSH stderr\n", m.Name)
-			fmt.Println(str)
+		if str != "" {
+			m.Printf("2>: %s", str)
+		}
+		if err == io.EOF {
+			return
 		}
 	}
 }

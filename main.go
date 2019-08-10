@@ -25,11 +25,12 @@ import (
 	"golang.org/x/crypto/ssh/terminal"
 )
 
-// TODO: fix stdout for hosts, its not printing. You can test with cmd: ">&2 echo error"
+// TODO: there is a 10 host limit for a single droplet creation call. for larger, split into multiple calls.
 
 var (
 	ports       = flag.String("ports", "", "nmap compliant port list. It's devided into buckets, one for each droplet and made available in the cmd template as {{.ports}}")
 	cmd         = flag.String("cmd", "", "templated command to run on droplets")
+	pkg         = flag.String("pkg", "nmap", "packages to install, separated by comma")
 	token       = flag.String("token", "", "DO API key; Or use DOTOKEN env var")
 	sshLocation = flag.String("key-location", "~/.ssh/id_rsa", "SSH key location")
 	count       = flag.Int("count", 5, "Amount of droplets to deploy")
@@ -84,11 +85,14 @@ func main() {
 	for region, c := range regionCountMap {
 		log.Printf("Creating %d droplets in region %s", c, region)
 		drops, _, err := client.Droplets.CreateMultiple(context.Background(), newDropLetMultiCreateRequest(*name, region, keyID, c))
+		droplets = append(droplets, drops...)
 		if err != nil {
-			log.Printf("There was an error creating the droplets:\nError: %v\n", err)
+			log.Printf("There was an error creating the droplets: %v\n", err)
+			log.Println("Attempting cleanup...")
+			machines := dropletsToMachines(droplets)
+			cleanup(machines, client)
 			log.Fatalln("You may need to do some manual clean up!")
 		}
-		droplets = append(droplets, drops...)
 	}
 
 	machines := dropletsToMachines(droplets)
@@ -102,13 +106,7 @@ func main() {
 	go func(sig chan os.Signal, done chan bool, machines []Machine, client *godo.Client) {
 		<-sig
 		fmt.Println()
-		for _, m := range machines {
-			if err := m.Destroy(client); err != nil {
-				log.Printf("Could not delete droplet name: %s\n", m.Name)
-			} else {
-				log.Printf("Deleted droplet name: %s", m.Name)
-			}
-		}
+		cleanup(machines, client)
 		log.Println("Exiting...")
 		os.Exit(0)
 	}(sig, done, machines, client)
@@ -153,7 +151,6 @@ func main() {
 		m.Println("Droplet ready")
 	}
 
-	// would be nice to use a sync group and do this all at the same time.
 	var portBuckets []string
 	if *ports != "" {
 		// portBuckets, err = csrange.SplitString(len(readyMachines), *ports) // use non-contiguous csr's
@@ -168,7 +165,6 @@ func main() {
 	for i, m := range readyMachines {
 		wg.Add(1)
 		go func(idx int, m *Machine) {
-			// perform additional setup only applicable to successfully deployed machines
 			m.Println("Establishing SSH connection...")
 			client, err := ssh.Dial("tcp", m.IPv4+":22", m.SSHConfig)
 			if err != nil {
@@ -181,10 +177,11 @@ func main() {
 
 			m.SSHClient = client
 
-			m.Println("Installing packages")
-			m.InstallPackages([]string{"nmap"})
+			if *pkg != "" {
+				m.Println("Installing packages")
+				m.InstallPackages(strings.Split(*pkg, ","))
+			}
 
-			// Assign variables requiring successful IsReady
 			if *ports != "" {
 				m.Ports = portBuckets[idx]
 			}
@@ -206,16 +203,9 @@ func main() {
 
 			wg.Done()
 		}(i, m)
-
-		// add waitgroup
-
-		// if doesn't error from starting ssh proxy:
-		// log.Printf("SSH proxy started on port %d on droplet name: %s IP: %s\n", *startPort, m.Name, m.IPv4)
-		// go m.PrintStdError()
 	}
 
 	wg.Wait()
-
 	log.Println("Done. All commands have been run.")
 	log.Println("Please CTRL-C to destroy droplets")
 	<-done
@@ -303,4 +293,14 @@ func openSSHKey(privKeyPath string) (ssh.Signer, error) {
 	}
 
 	return signer, nil
+}
+
+func cleanup(machines []Machine, client *godo.Client) {
+	for _, m := range machines {
+		if err := m.Destroy(client); err != nil {
+			log.Printf("Could not delete droplet name: %s\n", m.Name)
+		} else {
+			log.Printf("Deleted droplet name: %s", m.Name)
+		}
+	}
 }
