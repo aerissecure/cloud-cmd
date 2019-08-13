@@ -40,6 +40,14 @@ In the example above we have the solution to the problem that motivated the crea
 
 Also note that we are using `-oX -` in the command to output the scan results in xml format to stdout where they will be captured by cloud-cmd and redirected to the output file for that cloud instance.
 
+Note that since XML output is hierarchical, Nmap cannot output any port scan results until all ports for a host are done scanning. You will only see progress updates like the following until at least one host is complete:
+
+```xml
+<taskprogress task="SYN Stealth Scan" time="1565727654" percent="1.15" remaining="10402" etc="1565738055"/>
+```
+
+With a sufficiently large `--min-hostgroup`, all hosts should scan concurrently, which means you won't have any results until the scan is 100% complete. You could consider adding an additional output `-oN filename` if you want to peek in on progress by SSHing to one of the instances.
+
 
 ### Install
 
