@@ -192,7 +192,9 @@ func main() {
 			}
 
 			m.Printf("Running command: %v\n", command)
-			fname := fmt.Sprintf("out-%d.xml", m.Index)
+
+			fnameFmt := "out-%0" + fmt.Sprintf("%d", len(fmt.Sprintf("%d", *count))) + "d.xml"
+			fname := fmt.Sprintf(fnameFmt, m.Index)
 			err = m.RunCommand(fname)
 			if err != nil {
 				m.Printf("Error running command: %v", err)
