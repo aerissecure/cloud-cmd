@@ -1,6 +1,6 @@
 # cloud-cmd
 
-cloud-cmd was forked from the wonderful `tomsteele/cloud-proxy` project. Where the goal of cloud-proxy was to provide multiple cloud instances for SOCKS proxies, cloud-cmd provides a convenient way to divide commands among multiple cloud instances.
+cloud-cmd was forked from the wonderful [tomsteele/cloud-proxy](https://github.com/tomsteele/cloud-proxy) project. Where the goal of cloud-proxy was to provide multiple cloud instances for SOCKS proxies, cloud-cmd provides a convenient way to divide commands among multiple cloud instances.
 
 The primary use case, at least currently, is to split an Nmap scan across multiple cloud instances. During penetration testing engagements we sometimes encounter targets that blacklist you or otherwise change their bahaviour when they detect they are being port scanned (such as show all ports as open...I'm looking at you SonicWall).
 
