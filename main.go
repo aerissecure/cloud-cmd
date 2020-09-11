@@ -35,11 +35,9 @@ var (
 	sshLocation = flag.String("key-location", "~/.ssh/id_rsa", "SSH key location")
 	count       = flag.Int("count", 5, "Amount of droplets to deploy")
 	name        = flag.String("name", "cloud-proxy", "Droplet name prefix")
-	ext         = flag.String("ext", ".xml", "file extension for command output files")
+	out         = flag.String("out", "out-%v.xml", "filename template used for output files ('%v' is replaced by index)")
 	regions     = flag.String("regions", "*", "Comma separated list of regions to deploy droplets to, defaults to all.")
 	force       = flag.Bool("force", false, "Bypass built-in protections that prevent you from deploying more than 50 droplets")
-	// TODO: REMOVE: proxy specific
-	startPort   = flag.Int("start-tcp", 55555, "TCP port to start first proxy on and increment from")
 	showversion = flag.Bool("v", false, "Print version and exit")
 	version     = "1.0.0"
 )
@@ -124,7 +122,7 @@ func main() {
 	for i := range machines {
 		m := &machines[i]
 
-		m.Index = i + 1
+		m.Index = zeroPad(len(readyMachines), i+1)
 		m.Template = *cmd
 
 		sshConfig := &ssh.ClientConfig{
@@ -193,8 +191,7 @@ func main() {
 
 			m.Printf("Running command: %v\n", command)
 
-			fnameFmt := "out-%0" + fmt.Sprintf("%d", len(fmt.Sprintf("%d", *count))) + "d.xml"
-			fname := fmt.Sprintf(fnameFmt, m.Index)
+			fname := fmt.Sprintf(*out, m.Index)
 			err = m.RunCommand(fname)
 			if err != nil {
 				m.Printf("Error running command: %v", err)
@@ -211,6 +208,14 @@ func main() {
 	log.Println("Done. All commands have been run.")
 	log.Println("Please CTRL-C to destroy droplets")
 	<-done
+}
+
+// zeroPad zero pads a number, idx, with the correct number of zeros given the
+// total.
+func zeroPad(total, idx int) string {
+	ndigits := len(fmt.Sprintf("%d", total))
+	tpl := "%0" + fmt.Sprintf("%d", ndigits) + "d"
+	return fmt.Sprintf(tpl, idx)
 }
 
 func regionMap(slugs []string, regions string, count int) (map[string]int, error) {

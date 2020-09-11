@@ -20,7 +20,7 @@ import (
 // Machine is just a wrapper around a created droplet.
 type Machine struct {
 	ID        int
-	Index     int // Index (starting with 1) for the order droplet was created
+	Index     string // zero-padded, creation order ID
 	Name      string
 	IPv4      string
 	SSHActive bool

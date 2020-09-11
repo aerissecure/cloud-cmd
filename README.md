@@ -36,7 +36,7 @@ While the command is running on the cloud instances, stderr for the SSH session 
 ./cloud-cmd -key-location ~/.ssh/keys.d/id_rsa.admin -name clientName -count 50 -cmd "nmap -v4 -oX - -Pn -n --max-rate 10 -p {{.ports}} -sS aerissecure.com" -ports 1-65535 -force
 ```
 
-In the example above we have the solution to the problem that motivated the creation of cloud-cmd. We are limiting the rate of our nmap scan using `--max-rate 10` which is incredibly slow. It would take around 3 hours to complete a scan of all ports on a single host with a rate that low if we were scanning from a single system. We've specified a port list with `-ports` that will split those ports accross each cloud instance. Note that the actual command to be run will be printed to the shell before running on each cloud instance.
+In the example above we have the solution to the problem that motivated the creation of cloud-cmd. We are limiting the rate of our nmap scan using `--max-rate 10` which is incredibly slow. It would take around 3 hours to complete a scan of all 65535 ports on a single host with a rate that low if we were scanning from a single system. We've specified a port list with `-ports` that will split those ports accross each cloud instance. Note that the actual command to be run will be printed to the shell before running on each cloud instance. NOTE: that a rate of 10 is what I commonly use for scanning SonicWall firewalls.
 
 Also note that we are using `-oX -` in the command to output the scan results in xml format to stdout where they will be captured by cloud-cmd and redirected to the output file for that cloud instance.
 

@@ -37,9 +37,7 @@ func newDropLetMultiCreateRequest(prefix, region, keyID string, count int) *godo
 			Slug: "debian-10-x64",
 		},
 		SSHKeys: []godo.DropletCreateSSHKey{
-			godo.DropletCreateSSHKey{
-				Fingerprint: keyID,
-			},
+			{Fingerprint: keyID},
 		},
 		Backups:           false,
 		IPv6:              false,
