@@ -18,11 +18,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/aerissecure/csrange"
-	"github.com/digitalocean/godo"
-
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/terminal"
+
+	"github.com/aerissecure/csrange"
+	"github.com/digitalocean/godo"
+	"github.com/fatih/color"
 )
 
 // TODO: there is a 10 host limit for a single droplet creation call. for larger, split into multiple calls.
@@ -40,6 +41,10 @@ var (
 	force       = flag.Bool("force", false, "Bypass built-in protections that prevent you from deploying more than 50 droplets")
 	showversion = flag.Bool("v", false, "Print version and exit")
 	version     = "1.0.0"
+
+	yellow = color.New(color.FgYellow)
+	green  = color.New(color.FgGreen)
+	red    = color.New(color.FgRed)
 )
 
 func main() {
@@ -80,6 +85,8 @@ func main() {
 	}
 	droplets := []godo.Droplet{}
 
+	log.Printf("creating %d droplets\n", *count)
+
 	for region, c := range regionCountMap {
 		log.Printf("Creating %d droplets in region %s", c, region)
 		drops, _, err := client.Droplets.CreateMultiple(context.Background(), newDropLetMultiCreateRequest(*name, region, keyID, c))
@@ -111,18 +118,13 @@ func main() {
 
 	log.Println("Please CTRL-C to destroy droplets")
 
-	log.Println("Waiting for droplets to finish provisioning")
-	continueTime := time.Now().Add(time.Second * 100).Round(time.Second)
-	for time.Now().Before(continueTime.Add(time.Second * -1)) {
-		log.Printf("Waiting %v seconds...\n", continueTime.Sub(time.Now().Round(time.Second)).Seconds())
-		time.Sleep(time.Second * 10)
-	}
+	log.Println("Provisioning droplets")
 
 	var readyMachines []*Machine
 	for i := range machines {
 		m := &machines[i]
 
-		m.Index = zeroPad(len(readyMachines), i+1)
+		m.Index = zeroPad(*count, i+1)
 		m.Template = *cmd
 
 		sshConfig := &ssh.ClientConfig{
@@ -135,18 +137,22 @@ func main() {
 
 		m.SSHConfig = sshConfig
 
-		if err := m.GetIPs(client); err != nil {
-			m.Printf("Error getting the IPv4 address of droplet: %v", err)
-		}
-
-		m.Printf("IPv4 Address: %s", m.IPv4)
-
-		if !m.IsReady() {
-			m.Println("Droplet not ready yet. Skipping...")
+		// get IPv4 address, waiting until available
+		for {
+			if err := m.GetIPs(client); err != nil {
+				m.Printf("Error getting the IPv4 address of droplet: %v", err)
+			}
+			if !m.IsReady() {
+				m.Colorln(yellow, "Droplet not ready yet, sleeping 5s")
+				time.Sleep(5 * time.Second)
+				continue
+			}
+			break
 		}
 
 		readyMachines = append(readyMachines, m)
-		m.Println("Droplet ready")
+		m.Printf("IPv4 Address: %s", m.IPv4)
+		m.Colorln(green, "Droplet ready")
 	}
 
 	var portBuckets []string
@@ -164,16 +170,22 @@ func main() {
 		wg.Add(1)
 		go func(idx int, m *Machine) {
 			m.Println("Establishing SSH connection...")
-			client, err := ssh.Dial("tcp", m.IPv4+":22", m.SSHConfig)
-			if err != nil {
-				m.Println("Error establishing SSH connection. Results may be incomplete. Please exit and try again")
-				wg.Done()
-				return
+
+			for {
+				client, err := ssh.Dial("tcp", m.IPv4+":22", m.SSHConfig)
+				if err != nil {
+					fmt.Println("ERROR:", err)
+					m.Colorln(yellow, "Error establishing SSH connection, retrying...")
+					time.Sleep(10 * time.Second)
+					// why is this sleep not working????
+					// wg.Done() // don't call it quits here, keep trying to connect
+					// return
+					continue
+				}
+				m.Colorln(green, "SSH connection established.")
+				m.SSHClient = client
+				break
 			}
-
-			m.Println("SSH connection established.")
-
-			m.SSHClient = client
 
 			if *pkg != "" {
 				m.Println("Installing packages")
@@ -198,7 +210,7 @@ func main() {
 			}
 
 			m.Printf("Results: %s\n", fname)
-			m.Println("Done. Exiting...")
+			m.Colorln(green, "Done. Exiting...")
 
 			wg.Done()
 		}(i, m)

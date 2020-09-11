@@ -15,6 +15,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/digitalocean/godo"
+	"github.com/fatih/color"
 )
 
 // Machine is just a wrapper around a created droplet.
@@ -34,15 +35,28 @@ type Machine struct {
 	Ports     string
 }
 
-// Println uses fmt.Println to log to the console, formatted for this machine.
+// Println uses log.Println to log to the console, formatted for this machine.
 func (m *Machine) Println(a ...interface{}) {
-	a = append([]interface{}{fmt.Sprintf("%s (%d):", m.Name, m.Index)}, a...)
+	a = append([]interface{}{fmt.Sprintf("%s (%s):", m.Name, m.Index)}, a...)
 	log.Println(a...)
 }
 
-// Printf uses fmt.Printf to log to the console, formatted for this machine.
+// Printf uses log.Printf to log to the console, formatted for this machine.
 func (m *Machine) Printf(format string, a ...interface{}) {
-	log.Printf(fmt.Sprintf("%s (%d): %s", m.Name, m.Index, format), a...)
+	log.Printf(fmt.Sprintf("%s (%s): %s", m.Name, m.Index, format), a...)
+}
+
+// Colorln uses log.Println to log to the console, formatted for this machine.
+// The log line will be formatted with the specified color.
+func (m *Machine) Colorln(c *color.Color, a ...interface{}) {
+	a = append([]interface{}{fmt.Sprintf("%s (%s):", m.Name, m.Index)}, a...)
+	log.Print(c.Sprintln(a...))
+}
+
+// Colorf uses log.Printf to log to the console, formatted for this machine.
+// The log line will be formatted with the specified color.
+func (m *Machine) Colorf(c *color.Color, format string, a ...interface{}) {
+	log.Print(c.Sprintf(fmt.Sprintf("%s (%s): %s", m.Name, m.Index, format), a...))
 }
 
 // IsReady ensures that the machine has an IP address.
@@ -129,7 +143,7 @@ func (m *Machine) RunCommand(filename string) error {
 	return session.Wait()
 }
 
-// Command generates the command to be run on the remote hosting using the defined Template.
+// Command generates the command to be run on the remote host using the defined Template.
 func (m *Machine) Command() (string, error) {
 	vars := map[string]interface{}{
 		"ports": m.Ports,
