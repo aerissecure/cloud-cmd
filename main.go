@@ -11,8 +11,8 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
-	// "strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -111,6 +111,7 @@ func main() {
 	go func(sig chan os.Signal, done chan bool, machines []Machine, client *godo.Client) {
 		<-sig
 		fmt.Println()
+		log.Println(color.BlueString("Terminating droplets..."))
 		cleanup(machines, client)
 		log.Println("Exiting...")
 		os.Exit(0)
@@ -165,19 +166,20 @@ func main() {
 	}
 
 	var wg sync.WaitGroup
+	send := []chan string{}
 
+	log.Println("Establishing SSH connections...")
 	for i, m := range readyMachines {
 		wg.Add(1)
-		go func(idx int, m *Machine) {
-			m.Println("Establishing SSH connection...")
-
+		c := make(chan string)
+		send = append(send, c)
+		go func(idx int, m *Machine, c <-chan string) {
 			for {
 				client, err := ssh.Dial("tcp", m.IPv4+":22", m.SSHConfig)
 				if err != nil {
 					fmt.Println("ERROR:", err)
 					m.Colorln(yellow, "Error establishing SSH connection, retrying...")
 					time.Sleep(10 * time.Second)
-					// why is this sleep not working????
 					// wg.Done() // don't call it quits here, keep trying to connect
 					// return
 					continue
@@ -204,7 +206,7 @@ func main() {
 			m.Printf("Running command: %v\n", command)
 
 			fname := fmt.Sprintf(*out, m.Index)
-			err = m.RunCommand(fname)
+			err = m.RunCommand(fname, c)
 			if err != nil {
 				m.Printf("Error running command: %v", err)
 			}
@@ -213,13 +215,41 @@ func main() {
 			m.Colorln(green, "Done. Exiting...")
 
 			wg.Done()
-		}(i, m)
+		}(i, m, c)
 	}
+
+	// Send types characters to stdin of every machine
+	// Note: nmap 7.70 will only print status lines after 1% complete
+	// You can also specify Nmap flag: --stats-every
+	stdin := make(chan string, 1)
+	go readStdin(stdin)
+	go func() {
+		// TODO: why aren't commands sent in the order the machines were created?
+		for char := range stdin {
+			// will block until receiver machine is ready
+			for _, ch := range send {
+				ch <- char
+			}
+		}
+	}()
 
 	wg.Wait()
 	log.Println("Done. All commands have been run.")
 	log.Println("Please CTRL-C to destroy droplets")
 	<-done
+}
+
+func readStdin(out chan string) {
+	exec.Command("stty", "-F", "/dev/tty", "cbreak", "min", "1").Run()
+	exec.Command("stty", "-F", "/dev/tty", "-echo").Run()
+	defer exec.Command("stty", "-F", "/dev/tty", "echo")
+
+	var b []byte = make([]byte, 1)
+	for {
+		os.Stdin.Read(b)
+		// fmt.Printf(">>> %v: ", b)
+		out <- string(b)
+	}
 }
 
 // zeroPad zero pads a number, idx, with the correct number of zeros given the
@@ -317,9 +347,9 @@ func openSSHKey(privKeyPath string) (ssh.Signer, error) {
 func cleanup(machines []Machine, client *godo.Client) {
 	for _, m := range machines {
 		if err := m.Destroy(client); err != nil {
-			log.Printf("Could not delete droplet name: %s\n", m.Name)
+			log.Println(red.Sprintf("Could not delete droplet name: %s", m.Name))
 		} else {
-			log.Printf("Deleted droplet name: %s", m.Name)
+			log.Println(green.Sprintf("Deleted droplet name: %s", m.Name))
 		}
 	}
 }

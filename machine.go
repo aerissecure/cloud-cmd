@@ -50,7 +50,8 @@ func (m *Machine) Printf(format string, a ...interface{}) {
 // The log line will be formatted with the specified color.
 func (m *Machine) Colorln(c *color.Color, a ...interface{}) {
 	a = append([]interface{}{fmt.Sprintf("%s (%s):", m.Name, m.Index)}, a...)
-	log.Print(c.Sprintln(a...))
+	// Must use Sprintln to get spaces between operands, Sprint formats differently
+	log.Println(c.Sprint(strings.TrimSuffix(fmt.Sprintln(a...), "\n")))
 }
 
 // Colorf uses log.Printf to log to the console, formatted for this machine.
@@ -111,18 +112,30 @@ func (m *Machine) InstallPackages(packages []string) error {
 
 // RunCommand runs the templated command on the remote host. This should
 // be launched in a go routine using a waitgroup.
-func (m *Machine) RunCommand(filename string) error {
+func (m *Machine) RunCommand(filename string, send <-chan string) error {
 	output, err := os.Create(filename)
 	if err != nil {
 		return fmt.Errorf("error creating file for stdout: %v", err)
 	}
+
 	session, err := m.SSHClient.NewSession()
 	if err != nil {
 		return fmt.Errorf("error creating ssh session: %v", err)
 	}
+
 	session.Stdout = output
-	// hook up a stderr pipe to use the machine's println to record the status. i think launching this
-	// in a goroutine and then terminating the goroutine on eof would be good enough.
+
+	stdin, err := session.StdinPipe()
+	if err != nil {
+		return err
+	}
+	go func() {
+		for val := range send {
+			m.Colorf(color.New(color.FgMagenta), "Sending: %q", val)
+			stdin.Write([]byte(val))
+		}
+	}()
+	// go io.Copy(stdin, os.Stdin)
 
 	stderr, err := session.StderrPipe()
 	if err != nil {
@@ -136,6 +149,18 @@ func (m *Machine) RunCommand(filename string) error {
 		return fmt.Errorf("error creating templated command: %v", err)
 	}
 
+	modes := ssh.TerminalModes{
+		ssh.ECHO:          1,     // disable echoing
+		ssh.TTY_OP_ISPEED: 14400, // input speed = 14.4kbaud
+		ssh.TTY_OP_OSPEED: 14400, // output speed = 14.4kbaud
+	}
+	// Request pseudo terminal, required for runtime interaction (Nmap)
+	if err := session.RequestPty("xterm", 40, 80, modes); err != nil {
+		return fmt.Errorf("request for pseudo terminal failed: %v", err)
+	}
+
+	// For a truely interactive shell, send entire lines to stdin and call
+	// session.Shell() here instead.
 	if err = session.Start(cmd); err != nil {
 		return fmt.Errorf("error running command: %v", err)
 	}

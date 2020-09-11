@@ -34,6 +34,7 @@ func newDropLetMultiCreateRequest(prefix, region, keyID string, count int) *godo
 		Size:   "512mb",
 		Image: godo.DropletCreateImage{
 			// Slug: "ubuntu-14-04-x64",
+			// Slug: "ubuntu-20-04-x64", // requires 'snap install nmap'
 			Slug: "debian-10-x64",
 		},
 		SSHKeys: []godo.DropletCreateSSHKey{
